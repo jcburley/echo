@@ -2,111 +2,96 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"io"
+	"net"
 	"os"
-	"strconv"
-	"strings"
 )
 
 var (
-	helpFlag    bool
-	versionFlag bool
-	eval        string
-	filename    string
-	noReadline  bool
-	Stderr      = os.Stderr
-	Stdout      = os.Stdout
-	Stdin       = os.Stdin
+	helpFlag   bool
+	noReadline bool
+	eval       string
+	socket     string
+	Stderr     io.Writer = os.Stderr
+	Stdout     io.Writer = os.Stdout
+	Stdin      io.Reader = os.Stdin
 )
 
 func ExitEcho(rc int) {
 	os.Exit(rc)
 }
 
-func isNumber(s string) bool {
-	_, err := strconv.ParseInt(s, 10, 64)
-	return err == nil
+func InitSocket(fn func(*bufio.Reader, *bufio.Writer)) {
+	l, err := net.Listen("tcp", socket)
+	if err != nil {
+		fmt.Fprintf(Stderr, "Cannot start listening on %s: %s\n", socket, err.Error())
+		ExitEcho(12)
+	}
+	defer l.Close()
+
+	fmt.Printf("Listening at %s...\n", l.Addr())
+
+	conn, err := l.Accept() // Wait for a single connection
+	if err != nil {
+		fmt.Fprintf(Stderr, "Cannot start accepting on %s: %s\n",
+			l.Addr(), err.Error())
+		ExitEcho(13)
+	}
+
+	defer func() {
+		conn.Close()
+	}()
+
+	fmt.Printf("Accepting client at %s...\n", conn.RemoteAddr())
+
+	fmt.Fprintf(conn, "Welcome to echo, client at %s. Close the connection to exit.\n", conn.RemoteAddr())
+
+	fn(bufio.NewReader(conn), bufio.NewWriter(conn))
 }
 
-func notOption(arg string) bool {
-	return arg == "-" || !strings.HasPrefix(arg, "-") || isNumber(arg[1:])
-}
-
-func parseArgs(args []string) {
-	length := len(args)
-	stop := false
-	missing := false
-	noFileFlag := false
-	var i int
-	for i = 1; i < length; i++ { // shift
-		switch args[i] {
-		case "-": // denotes stdin
-			stop = true
-		case "--help", "-h":
-			helpFlag = true
-			return // don't bother parsing anything else
-		case "--version", "-v":
-			versionFlag = true
-		case "-e", "--eval":
-			if i < length-1 && notOption(args[i+1]) {
-				i += 1 // shift
-				eval = args[i]
-			} else {
-				missing = true
-			}
-		case "--no-readline":
-			noReadline = true
-		case "--file":
-			if i < length-1 && notOption(args[i+1]) {
-				i += 1 // shift
-				filename = args[i]
-			}
-		default:
-			if strings.HasPrefix(args[i], "-") {
-				fmt.Fprintf(Stderr, "Error: Unrecognized option '%s'\n", args[i])
-				ExitEcho(2)
-			}
-			stop = true
-		}
-		if stop || missing {
-			break
-		}
-	}
-	if missing {
-		fmt.Fprintf(Stderr, "Error: Missing argument for '%s' option\n", args[i])
-		ExitEcho(3)
-	}
-	if i < length && !noFileFlag && filename == "" {
-		filename = args[i]
-		i += 1 // shift
-	}
-	if i < length {
-		fmt.Fprintf(Stderr, "Error: Excess command-line arguments: %s\n", args[i:])
-		ExitEcho(4)
-	}
-}
-
-func main() {
-	parseArgs(os.Args)
-
-	if eval != "" {
-		fmt.Println(eval)
-		ExitEcho(0)
-	}
-
-	input := bufio.NewReader(Stdin)
+func echoInput(reader *bufio.Reader, writer *bufio.Writer) {
 	line := ""
 	for {
-		r, _, err := input.ReadRune()
+		r, _, err := reader.ReadRune()
 		if err != nil {
+			if err != io.EOF {
+				fmt.Fprintf(Stderr, "error reading input: %v\n", err)
+			}
 			break
 		}
 		if r == '\n' {
-			fmt.Println(line)
+			writer.WriteString(line + "\n")
+			writer.Flush()
 			line = ""
 		} else if r != '\r' {
 			line += string(r)
 		}
 	}
+}
+
+func main() {
+	if eval != "" {
+		fmt.Println(eval)
+		ExitEcho(0)
+	}
+
+	if socket == "" {
+		echoInput(bufio.NewReader(Stdin), bufio.NewWriter(Stdout))
+	} else {
+		InitSocket(echoInput)
+	}
+
 	ExitEcho(0)
+}
+
+func init() {
+	flag.BoolVar(&noReadline, "no-readline", false, "Use only canonical line input from stdin")
+	flag.BoolVar(&helpFlag, "h", false, "Print usage info and exit")
+	flag.BoolVar(&helpFlag, "help", false, "Print usage info and exit")
+	flag.StringVar(&eval, "i", "", "input string (instead of reading from stdin)")
+	flag.StringVar(&eval, "input", "", "input string (instead of reading from stdin)")
+	flag.StringVar(&socket, "socket", "", "socket upon which to listen for connections and then echo their input")
+	flag.Parse()
 }
