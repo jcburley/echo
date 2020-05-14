@@ -53,21 +53,17 @@ func InitSocket(fn func(*bufio.Reader, *bufio.Writer)) {
 }
 
 func echoInput(reader *bufio.Reader, writer *bufio.Writer) {
-	line := ""
 	for {
-		r, _, err := reader.ReadRune()
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			writer.WriteString(line)
+			writer.Flush()
+		}
 		if err != nil {
 			if err != io.EOF {
 				fmt.Fprintf(Stderr, "error reading input: %v\n", err)
 			}
 			break
-		}
-		if r == '\n' {
-			writer.WriteString(line + "\n")
-			writer.Flush()
-			line = ""
-		} else if r != '\r' {
-			line += string(r)
 		}
 	}
 }
