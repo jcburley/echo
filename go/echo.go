@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"github.com/chzyer/readline"
 	"io"
 	"net"
 	"os"
@@ -78,7 +79,26 @@ func main() {
 	}
 
 	if socket == "" {
-		echoInput(bufio.NewReader(Stdin), bufio.NewWriter(Stdout))
+		if noReadline {
+			echoInput(bufio.NewReader(Stdin), bufio.NewWriter(Stdout))
+		} else {
+			rl, err := readline.New("")
+			if err != nil {
+				fmt.Fprintf(Stderr, "Cannot init readline: %v\n", err)
+				ExitEcho(1)
+			}
+			defer rl.Close()
+			for {
+				line, err := rl.Readline()
+				if err != nil {
+					if err != io.EOF {
+						fmt.Fprintf(Stderr, "error reading input: %v\n", err)
+					}
+					break
+				}
+				fmt.Println(line)
+			}
+		}
 	} else {
 		InitSocket(echoInput)
 	}
