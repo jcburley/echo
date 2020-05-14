@@ -24,7 +24,7 @@ func ExitEcho(rc int) {
 	os.Exit(rc)
 }
 
-func InitSocket(fn func(*bufio.Reader, *bufio.Writer)) {
+func InitSocket(fn func(func() (string, error), *bufio.Writer)) {
 	l, err := net.Listen("tcp", socket)
 	if err != nil {
 		fmt.Fprintf(Stderr, "Cannot start listening on %s: %s\n", socket, err.Error())
@@ -49,12 +49,16 @@ func InitSocket(fn func(*bufio.Reader, *bufio.Writer)) {
 
 	fmt.Fprintf(conn, "Welcome to echo, client at %s. Close the connection to exit.\n", conn.RemoteAddr())
 
-	fn(bufio.NewReader(conn), bufio.NewWriter(conn))
+	input := bufio.NewReader(conn)
+	fn(func() (string, error) {
+		return input.ReadString('\n')
+	},
+		bufio.NewWriter(conn))
 }
 
-func echoInput(reader *bufio.Reader, writer *bufio.Writer) {
+func echoInput(readFn func() (string, error), writer *bufio.Writer) {
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := readFn()
 		if line != "" {
 			writer.WriteString(line)
 			writer.Flush()
@@ -74,9 +78,18 @@ func main() {
 		ExitEcho(0)
 	}
 
+	if helpFlag {
+		flag.Usage()
+		ExitEcho(0)
+	}
+
 	if socket == "" {
 		if noReadline {
-			echoInput(bufio.NewReader(Stdin), bufio.NewWriter(Stdout))
+			input := bufio.NewReader(Stdin)
+			echoInput(func() (string, error) {
+				return input.ReadString('\n')
+			},
+				bufio.NewWriter(Stdout))
 		} else {
 			rl, err := readline.New("")
 			if err != nil {
