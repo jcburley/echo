@@ -14,6 +14,7 @@ var (
 	helpFlag   bool
 	noReadline bool
 	eval       string
+	connectTo  string
 	socket     string
 	Stderr     io.Writer = os.Stderr
 	Stdout     io.Writer = os.Stdout
@@ -49,11 +50,28 @@ func InitSocket(fn func(func() (string, error), *bufio.Writer)) {
 
 	fmt.Fprintf(conn, "Welcome to echo, client at %s. Close the connection to exit.\n", conn.RemoteAddr())
 
-	input := bufio.NewReader(conn)
-	fn(func() (string, error) {
-		return input.ReadString('\n')
-	},
-		bufio.NewWriter(conn))
+	if noReadline {
+		input := bufio.NewReader(conn)
+		fn(func() (string, error) {
+			return input.ReadString('\n')
+		},
+			bufio.NewWriter(conn))
+	} else {
+		cfg := readline.Config{Prompt: "@ "}
+		rl, err := readline.HandleConn(cfg, conn)
+		if err != nil {
+			fmt.Fprintf(Stderr, "Cannot init readline: %v\n", err)
+			ExitEcho(2)
+		}
+		echoInput(func() (string, error) {
+			line, err := rl.Readline()
+			if line != "" || err == nil {
+				line += "\n"
+			}
+			return line, err
+		},
+			bufio.NewWriter(conn))
+	}
 }
 
 func echoInput(readFn func() (string, error), writer *bufio.Writer) {
@@ -83,6 +101,16 @@ func main() {
 		ExitEcho(0)
 	}
 
+	if connectTo != "" {
+		n := "tcp"
+		err := readline.DialRemote(n, connectTo)
+		if err != nil {
+			fmt.Fprintf(Stderr, "Cannot dial n=%s addr=%s: %v\n", n, connectTo, err)
+			ExitEcho(3)
+		}
+		ExitEcho(0)
+	}
+
 	if socket == "" {
 		if noReadline {
 			input := bufio.NewReader(Stdin)
@@ -91,22 +119,20 @@ func main() {
 			},
 				bufio.NewWriter(Stdout))
 		} else {
-			rl, err := readline.New("")
+			rl, err := readline.New("> ")
 			if err != nil {
 				fmt.Fprintf(Stderr, "Cannot init readline: %v\n", err)
 				ExitEcho(1)
 			}
 			defer rl.Close()
-			for {
+			echoInput(func() (string, error) {
 				line, err := rl.Readline()
-				if err != nil {
-					if err != io.EOF {
-						fmt.Fprintf(Stderr, "error reading input: %v\n", err)
-					}
-					break
+				if line != "" || err == nil {
+					line += "\n"
 				}
-				fmt.Println(line)
-			}
+				return line, err
+			},
+				bufio.NewWriter(Stdout))
 		}
 	} else {
 		InitSocket(echoInput)
@@ -121,6 +147,7 @@ func init() {
 	flag.BoolVar(&helpFlag, "help", false, "Print usage info and exit")
 	flag.StringVar(&eval, "i", "", "input string (instead of reading from stdin)")
 	flag.StringVar(&eval, "input", "", "input string (instead of reading from stdin)")
+	flag.StringVar(&connectTo, "connect-to", "", "act as a client connecting to server at specified address")
 	flag.StringVar(&socket, "socket", "", "socket upon which to listen for connections and then echo their input")
 	flag.Parse()
 }
