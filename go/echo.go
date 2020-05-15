@@ -4,23 +4,26 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"github.com/candid82/liner"
 	"github.com/chzyer/readline"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 var (
-	helpFlag   bool
-	lineReader string
-	eval       string
-	connectTo  string
-	socket     string
-	prompt     string
-	Stderr     io.Writer = os.Stderr
-	Stdout     io.Writer = os.Stdout
-	Stdin      io.Reader = os.Stdin
+	helpFlag    bool
+	lineReader  string
+	eval        string
+	connectTo   string
+	socket      string
+	prompt      string
+	historyFile string
+	Stderr      io.Writer = os.Stderr
+	Stdout      io.Writer = os.Stdout
+	Stdin       io.Reader = os.Stdin
 )
 
 func ExitEcho(rc int) {
@@ -53,7 +56,7 @@ func InitSocket(fn func(func() (string, error), *bufio.Writer)) {
 	fmt.Fprintf(conn, "Welcome to echo, client at %s. Close the connection to exit.\n", conn.RemoteAddr())
 
 	switch lineReader {
-	case "":
+	default:
 		input := bufio.NewReader(conn)
 		fn(func() (string, error) {
 			fmt.Fprint(conn, prompt)
@@ -61,6 +64,7 @@ func InitSocket(fn func(func() (string, error), *bufio.Writer)) {
 		},
 			bufio.NewWriter(conn))
 	case "chzyer/readline":
+		// This doesn't appear to work, or at least is ill-documented:
 		cfg := readline.Config{Prompt: prompt}
 		rl, err := readline.HandleConn(cfg, conn)
 		if err != nil {
@@ -97,6 +101,7 @@ func echoInput(readFn func() (string, error), writer *bufio.Writer) {
 var lineReaders = map[string]struct{}{
 	"":                struct{}{},
 	"chzyer/readline": struct{}{},
+	"candid82/liner":  struct{}{},
 }
 
 func main() {
@@ -116,6 +121,7 @@ func main() {
 	}
 
 	if connectTo != "" {
+		// This doesn't appear to work, or at least is ill-documented:
 		n := "tcp"
 		err := readline.DialRemote(n, connectTo)
 		if err != nil {
@@ -123,6 +129,15 @@ func main() {
 			ExitEcho(3)
 		}
 		ExitEcho(0)
+	}
+
+	if historyFile != "" {
+		historyFileDir := filepath.Dir(historyFile)
+		if _, err := os.Stat(historyFileDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(historyFileDir, 0777); err != nil {
+				fmt.Fprintf(Stderr, "WARNING: could not create %s\n", historyFileDir)
+			}
+		}
 	}
 
 	if socket == "" {
@@ -149,6 +164,29 @@ func main() {
 				return line, err
 			},
 				bufio.NewWriter(Stdout))
+		case "candid82/liner":
+			rl := liner.NewLiner()
+			if historyFile != "" {
+				if f, err := os.Open(historyFile); err == nil {
+					rl.ReadHistory(f)
+					f.Close()
+				}
+			}
+			echoInput(func() (string, error) {
+				line, err := rl.Prompt(prompt)
+				if line != "" || err == nil {
+					line += "\n"
+				}
+				return line, err
+			},
+				bufio.NewWriter(Stdout))
+			if historyFile != "" {
+				if f, err := os.Create(historyFile); err == nil {
+					rl.WriteHistory(f)
+					f.Close()
+				}
+			}
+			rl.Close()
 		}
 	} else {
 		InitSocket(echoInput)
@@ -174,6 +212,7 @@ func init() {
 	flag.StringVar(&connectTo, "connect-to", "", "act as a client connecting to server at specified address")
 	flag.StringVar(&socket, "socket", "", "socket upon which to listen for connections and then echo their input")
 	flag.StringVar(&prompt, "prompt", "\000", "overrides the default prompt")
+	flag.StringVar(&historyFile, "history", "", "file containing history of previous lines entered")
 	flag.Parse()
 	if prompt == "\000" {
 		prompt = lineReader + "> "
