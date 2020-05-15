@@ -30,7 +30,7 @@ func ExitEcho(rc int) {
 	os.Exit(rc)
 }
 
-func InitSocket(fn func(func() (string, error), *bufio.Writer)) {
+func HandleSocket(fn func(func() (string, error), *bufio.Writer)) {
 	l, err := net.Listen("tcp", socket)
 	if err != nil {
 		fmt.Fprintf(Stderr, "Cannot start listening on %s: %s\n", socket, err.Error())
@@ -79,6 +79,61 @@ func InitSocket(fn func(func() (string, error), *bufio.Writer)) {
 			return line, err
 		},
 			bufio.NewWriter(conn))
+	}
+}
+
+func HandleStdin(fn func(func() (string, error), *bufio.Writer)) {
+	switch lineReader {
+	case "":
+		input := bufio.NewReader(Stdin)
+		echoInput(func() (string, error) {
+			fmt.Print(prompt)
+			return input.ReadString('\n')
+		},
+			bufio.NewWriter(Stdout))
+	case "chzyer/readline":
+		rl, err := readline.New(prompt)
+		if err != nil {
+			fmt.Fprintf(Stderr, "Cannot init readline: %v\n", err)
+			ExitEcho(1)
+		}
+		defer rl.Close()
+		echoInput(func() (string, error) {
+			line, err := rl.Readline()
+			if line != "" || err == nil {
+				line += "\n"
+			}
+			return line, err
+		},
+			bufio.NewWriter(Stdout))
+	case "candid82/liner":
+		rl := liner.NewLiner()
+		if historyFile != "" {
+			if f, err := os.Open(historyFile); err == nil {
+				rl.ReadHistory(f)
+				f.Close()
+			}
+		}
+		defer func() {
+			if historyFile != "" {
+				if f, err := os.Create(historyFile); err == nil {
+					rl.WriteHistory(f)
+					f.Close()
+				}
+			}
+			rl.Close()
+		}()
+		echoInput(func() (string, error) {
+			line, err := rl.Prompt(prompt)
+			if line != "" {
+				rl.AppendHistory(line)
+			}
+			if line != "" || err == nil {
+				line += "\n"
+			}
+			return line, err
+		},
+			bufio.NewWriter(Stdout))
 	}
 }
 
@@ -141,55 +196,9 @@ func main() {
 	}
 
 	if socket == "" {
-		switch lineReader {
-		case "":
-			input := bufio.NewReader(Stdin)
-			echoInput(func() (string, error) {
-				fmt.Print(prompt)
-				return input.ReadString('\n')
-			},
-				bufio.NewWriter(Stdout))
-		case "chzyer/readline":
-			rl, err := readline.New(prompt)
-			if err != nil {
-				fmt.Fprintf(Stderr, "Cannot init readline: %v\n", err)
-				ExitEcho(1)
-			}
-			defer rl.Close()
-			echoInput(func() (string, error) {
-				line, err := rl.Readline()
-				if line != "" || err == nil {
-					line += "\n"
-				}
-				return line, err
-			},
-				bufio.NewWriter(Stdout))
-		case "candid82/liner":
-			rl := liner.NewLiner()
-			if historyFile != "" {
-				if f, err := os.Open(historyFile); err == nil {
-					rl.ReadHistory(f)
-					f.Close()
-				}
-			}
-			echoInput(func() (string, error) {
-				line, err := rl.Prompt(prompt)
-				if line != "" || err == nil {
-					line += "\n"
-				}
-				return line, err
-			},
-				bufio.NewWriter(Stdout))
-			if historyFile != "" {
-				if f, err := os.Create(historyFile); err == nil {
-					rl.WriteHistory(f)
-					f.Close()
-				}
-			}
-			rl.Close()
-		}
+		HandleStdin(echoInput)
 	} else {
-		InitSocket(echoInput)
+		HandleSocket(echoInput)
 	}
 
 	ExitEcho(0)
