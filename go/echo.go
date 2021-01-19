@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"github.com/candid82/liner"
 	"github.com/chzyer/readline"
+	"github.com/peterh/liner"
 	"io"
 	"net"
 	"os"
@@ -106,8 +106,9 @@ func HandleStdin(fn func(func() (string, error), *bufio.Writer)) {
 			return line, err
 		},
 			bufio.NewWriter(Stdout))
-	case "candid82/liner":
+	case "candid82/liner", "peterh/liner":
 		rl := liner.NewLiner()
+		rl.SetCtrlCAborts(true)
 		if historyFile != "" {
 			if f, err := os.Open(historyFile); err == nil {
 				rl.ReadHistory(f)
@@ -157,6 +158,7 @@ var lineReaders = map[string]struct{}{
 	"":                struct{}{},
 	"chzyer/readline": struct{}{},
 	"candid82/liner":  struct{}{},
+	"peterh/liner":    struct{}{},
 }
 
 func main() {
